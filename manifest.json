@@ -1,0 +1,56 @@
+{
+  "name": "Garmin Dish Logger",
+  "short_name": "Dish Logger",
+  "description": "Snap a picture of a dish, compute calories & macros with Gemini Vision, and feed them directly into Garmin Connect.",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#0b0f17",
+  "theme_color": "#0b0f17",
+  "orientation": "portrait",
+  "categories": ["health", "fitness", "food"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Snap Dish Photo",
+      "short_name": "Snap Dish",
+      "description": "Open camera to photograph a meal",
+      "url": "./?action=camera",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Today's Garmin Log",
+      "short_name": "Garmin Log",
+      "description": "View today's Garmin Connect nutrition log",
+      "url": "./?action=log",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
