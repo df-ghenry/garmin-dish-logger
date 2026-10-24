@@ -168,6 +168,9 @@ async function initBackendConnection(maxRetries = 4) {
 
   const result = await connectionPromise;
   connectionPromise = null;
+  if (result !== null) {
+    void flushOfflineGarminQueue();
+  }
   return result;
 }
 
@@ -1001,10 +1004,84 @@ async function logCurrentDishToGarmin() {
       },
     );
   } catch (err) {
+    const isOffline = !state.connected || String(err.message).includes('laptop') || String(err.message).includes('reach');
+    if (isOffline) {
+      const queuedMeal = {
+        id: `offline-${Date.now()}`,
+        name: dishName,
+        calories,
+        protein,
+        carbs,
+        fat,
+        fiber: state.currentAnalysis.fiber || 0,
+        totalGrams: state.currentAnalysis.totalGrams || 350,
+        meal: state.selectedMeal,
+        date: state.selectedDate,
+        saveCustomFood: els.saveCustomFoodCheckbox.checked,
+        ingredients: state.currentAnalysis.ingredients,
+        thumbnailDataUrl: state.thumbnailDataUrl,
+        queuedAt: new Date().toISOString(),
+      };
+      saveToOfflineQueue(queuedMeal);
+      els.previewCard.classList.add('hidden');
+      clearSelectedPhoto();
+      els.userNotesInput.value = '';
+      showToast(`⏳ Saved offline (${dishName})! Will sync to Garmin Connect automatically when your laptop is online.`);
+      renderRecentHistory();
+      return;
+    }
     showToast(`Garmin log error: ${err.message}`, { isError: true });
   } finally {
     els.logToGarminBtn.disabled = false;
     els.logToGarminBtn.innerHTML = originalText;
+  }
+}
+
+function getOfflineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem('gdl_offline_queue') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveToOfflineQueue(item) {
+  const queue = getOfflineQueue();
+  queue.push(item);
+  localStorage.setItem('gdl_offline_queue', JSON.stringify(queue));
+}
+
+async function flushOfflineGarminQueue() {
+  if (!state.connected || !state.apiBaseUrl) return;
+  const queue = getOfflineQueue();
+  if (queue.length === 0) return;
+
+  let syncedCount = 0;
+  const remaining = [];
+
+  for (const item of queue) {
+    try {
+      const res = await apiFetch('/api/garmin/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
+      if (res.ok) {
+        syncedCount++;
+      } else {
+        remaining.push(item);
+      }
+    } catch {
+      remaining.push(item);
+    }
+  }
+
+  localStorage.setItem('gdl_offline_queue', JSON.stringify(remaining));
+
+  if (syncedCount > 0) {
+    showToast(`✓ Synced ${syncedCount} offline meal(s) to Garmin Connect!`);
+    fetchGarminNutrition(state.selectedDate);
+    fetchRecentHistory();
   }
 }
 
@@ -1016,19 +1093,56 @@ async function fetchRecentHistory() {
     state.historyItems = data.items || [];
     renderRecentHistory();
   } catch {
-    // Ignore
+    // Even if backend history fails, still render offline queued items
+    renderRecentHistory();
   }
 }
 
 function renderRecentHistory() {
+  const offlineQueue = getOfflineQueue();
   const items = state.historyItems;
-  if (!items || items.length === 0) {
+
+  if (offlineQueue.length === 0 && (!items || items.length === 0)) {
     els.recentHistoryList.innerHTML =
       '<div class="empty-state">Dishes you log will appear here for 1-tap re-logging.</div>';
     return;
   }
 
   els.recentHistoryList.innerHTML = '';
+
+  // Render offline queued items first
+  for (const q of offlineQueue) {
+    const row = document.createElement('div');
+    row.className = 'history-item';
+    row.style.borderColor = 'rgba(251, 191, 36, 0.4)';
+    row.innerHTML = `
+      <div class="food-item-main">
+        <span class="food-item-title">${escapeHtml(q.name)} <span class="badge badge-warn" style="font-size:0.65rem;">⏳ Queued Offline</span></span>
+        <span class="food-item-sub">${q.calories} kcal · P: ${q.protein}g · C: ${q.carbs}g · F: ${q.fat}g · Syncs when laptop connects</span>
+      </div>
+      <div class="food-item-right">
+        <button type="button" class="btn btn-xs btn-outline relog-preview-btn">Preview</button>
+      </div>
+    `;
+    row.querySelector('.relog-preview-btn').addEventListener('click', () => {
+      loadAnalysisIntoPreview({
+        dishName: q.name,
+        description: `Queued offline (${q.date})`,
+        confidence: 'high',
+        suggestedMeal: q.meal || 'LUNCH',
+        totalGrams: q.totalGrams || 350,
+        calories: q.calories,
+        protein: q.protein,
+        carbs: q.carbs,
+        fat: q.fat,
+        fiber: q.fiber || 0,
+        healthTip: '',
+        ingredients: q.ingredients || [],
+      });
+    });
+    els.recentHistoryList.appendChild(row);
+  }
+
   for (const item of items.slice(0, 8)) {
     const row = document.createElement('div');
     row.className = 'history-item';
