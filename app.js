@@ -1280,7 +1280,7 @@ function initEventListeners() {
     });
   }
 
-  // Voice Note (Web Speech API) with continuous dictation & pause auto-restart
+  // Voice Note (Web Speech API) with natural pause tolerance and no duplication
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
     const recognition = new SpeechRecognition();
@@ -1289,14 +1289,33 @@ function initEventListeners() {
     recognition.lang = navigator.language || 'fr-FR';
 
     let isRecording = false;
-    let baseTextBeforeRecording = '';
-    let autoStopTimer = null;
+    let initialTextBeforeSession = '';
+    let accumulatedFinalText = '';
+    let currentSessionFinalText = '';
+    let silenceTimer = null;
+    let maxSessionTimer = null;
+    const SILENCE_TIMEOUT_MS = 5000; // Auto-stop after 5 seconds of silence
+
+    const resetSilenceTimer = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      if (!isRecording) return;
+      silenceTimer = setTimeout(() => {
+        if (isRecording) {
+          stopRecording();
+          showToast('Fin de dictée (silence détecté).');
+        }
+      }, SILENCE_TIMEOUT_MS);
+    };
 
     const stopRecording = () => {
       isRecording = false;
-      if (autoStopTimer) {
-        clearTimeout(autoStopTimer);
-        autoStopTimer = null;
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+      if (maxSessionTimer) {
+        clearTimeout(maxSessionTimer);
+        maxSessionTimer = null;
       }
       try {
         recognition.stop();
@@ -1310,18 +1329,23 @@ function initEventListeners() {
 
     const startRecording = () => {
       isRecording = true;
-      baseTextBeforeRecording = els.userNotesInput.value.trim();
+      initialTextBeforeSession = els.userNotesInput.value.trim();
+      accumulatedFinalText = '';
+      currentSessionFinalText = '';
+
       els.voiceNoteBtn.classList.add('recording');
       els.voiceNoteBtn.innerHTML = '⏹️';
-      els.voiceNoteBtn.title = "Appuyez pour arrêter l'enregistrement";
+      els.voiceNoteBtn.title = 'Appuyez pour terminer la dictée';
 
-      // Generous 90s maximum timeout
-      autoStopTimer = setTimeout(() => {
+      resetSilenceTimer();
+
+      // Max safety timeout (60 seconds)
+      maxSessionTimer = setTimeout(() => {
         if (isRecording) {
           stopRecording();
-          showToast('Enregistrement vocal terminé (limite de 90s atteinte).');
+          showToast('Fin de dictée (durée maximale de 60s atteinte).');
         }
-      }, 90000);
+      }, 60000);
 
       try {
         recognition.start();
@@ -1336,26 +1360,31 @@ function initEventListeners() {
     };
 
     recognition.onresult = (event) => {
-      let interim = '';
-      let finalized = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      resetSilenceTimer();
+
+      let sessionFinal = '';
+      let sessionInterim = '';
+
+      for (let i = 0; i < event.results.length; i++) {
         const item = event.results[i];
         const text = item[0]?.transcript || '';
         if (item.isFinal) {
-          finalized += text + ' ';
+          sessionFinal += (sessionFinal ? ' ' : '') + text.trim();
         } else {
-          interim += text;
+          sessionInterim += (sessionInterim ? ' ' : '') + text.trim();
         }
       }
 
-      if (finalized) {
-        baseTextBeforeRecording = baseTextBeforeRecording
-          ? `${baseTextBeforeRecording} ${finalized.trim()}`
-          : finalized.trim();
-      }
+      currentSessionFinalText = sessionFinal;
 
-      const combined = (baseTextBeforeRecording + (interim ? ` ${interim.trim()}` : '')).trim();
-      els.userNotesInput.value = combined;
+      // Build full clean text without any duplication:
+      const parts = [];
+      if (initialTextBeforeSession) parts.push(initialTextBeforeSession);
+      if (accumulatedFinalText) parts.push(accumulatedFinalText);
+      if (currentSessionFinalText) parts.push(currentSessionFinalText);
+      if (sessionInterim) parts.push(sessionInterim);
+
+      els.userNotesInput.value = parts.join(' ').trim();
     };
 
     recognition.onerror = (e) => {
@@ -1367,12 +1396,15 @@ function initEventListeners() {
     };
 
     recognition.onend = () => {
-      // Chrome on Android drops recognition on short silence pauses; auto-resume if user didn't tap stop
+      // If recognition ended but user was still in the silence window (< 5s since last word):
       if (isRecording) {
+        if (currentSessionFinalText) {
+          accumulatedFinalText = (accumulatedFinalText ? `${accumulatedFinalText} ` : '') + currentSessionFinalText;
+          currentSessionFinalText = '';
+        }
         try {
           recognition.start();
         } catch {
-          // If restart fails, stop cleanly
           stopRecording();
         }
       } else {
@@ -1383,10 +1415,10 @@ function initEventListeners() {
     els.voiceNoteBtn.addEventListener('click', () => {
       if (isRecording) {
         stopRecording();
-        showToast('Note vocale enregistrée.');
+        showToast('Dictée enregistrée.');
       } else {
         startRecording();
-        showToast('🎙️ Enregistrement en cours... Parlez librement, appuyez sur ⏹️ pour terminer.');
+        showToast('🎙️ Dictée active... Parlez librement, arrêt automatique après 5s de silence.');
       }
     });
   } else {
