@@ -1280,68 +1280,52 @@ function initEventListeners() {
     });
   }
 
-  // Voice Note (Web Speech API) - Clean single session, deduplicated text, no infinite loop
-  function deduplicateTranscript(text) {
-    if (!text) return '';
-    let clean = text.replace(/\s+/g, ' ').trim();
-    let words = clean.split(' ');
-    if (words.length <= 1) return clean;
-
-    const normalize = (w) => w.toLowerCase().replace(/[.,!?;:]/g, '');
-
-    // Pass 1: Remove immediate consecutive identical words (e.g. "salade salade")
-    const pass1 = [];
+  // Voice Note (Web Speech API) - Clean single session with overlap-based transcript merging (no duplication on Android)
+  function cleanConsecutiveDuplicates(str) {
+    if (!str) return '';
+    const words = str.trim().split(/\s+/);
+    const out = [];
+    const normalize = (w) => w.toLowerCase().replace(/[.,!?;:()]/g, '');
     for (let i = 0; i < words.length; i++) {
       if (i > 0 && normalize(words[i]) === normalize(words[i - 1])) {
         continue;
       }
-      pass1.push(words[i]);
+      out.push(words[i]);
     }
-    words = pass1;
-    if (words.length <= 1) return words.join(' ');
+    return out.join(' ');
+  }
 
-    // Pass 2: Remove immediate consecutive identical phrases (e.g. "salade césar salade césar")
-    const out = [];
-    let i = 0;
-    while (i < words.length) {
-      let matchedLen = 0;
-      let repeatCount = 1;
-      const maxLen = Math.min(12, Math.floor((words.length - i) / 2));
+  function mergeTranscripts(existingText, newPiece) {
+    if (!existingText || !existingText.trim()) return (newPiece || '').trim();
+    if (!newPiece || !newPiece.trim()) return existingText.trim();
 
-      for (let len = maxLen; len >= 2; len--) {
-        let count = 1;
-        while (i + (count + 1) * len <= words.length) {
-          let isMatch = true;
-          for (let j = 0; j < len; j++) {
-            if (normalize(words[i + j]) !== normalize(words[i + count * len + j])) {
-              isMatch = false;
-              break;
-            }
-          }
-          if (isMatch) {
-            count++;
-          } else {
-            break;
-          }
-        }
-        if (count > 1) {
-          matchedLen = len;
-          repeatCount = count;
+    const normalize = (w) => w.toLowerCase().replace(/[.,!?;:()]/g, '');
+
+    const aWords = existingText.trim().split(/\s+/);
+    const bWords = newPiece.trim().split(/\s+/);
+
+    const maxK = Math.min(aWords.length, bWords.length);
+    let bestK = 0;
+
+    for (let k = maxK; k >= 1; k--) {
+      let match = true;
+      for (let j = 0; j < k; j++) {
+        if (normalize(aWords[aWords.length - k + j]) !== normalize(bWords[j])) {
+          match = false;
           break;
         }
       }
-
-      if (matchedLen > 0) {
-        for (let j = 0; j < matchedLen; j++) {
-          out.push(words[i + j]);
-        }
-        i += matchedLen * repeatCount;
-      } else {
-        out.push(words[i]);
-        i++;
+      if (match) {
+        bestK = k;
+        break;
       }
     }
-    return out.join(' ');
+
+    const remainingB = bWords.slice(bestK);
+    if (remainingB.length === 0) {
+      return existingText.trim();
+    }
+    return existingText.trim() + ' ' + remainingB.join(' ');
   }
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1376,9 +1360,8 @@ function initEventListeners() {
       els.voiceNoteBtn.innerHTML = '🎙️';
       els.voiceNoteBtn.title = 'Dicter une note vocale (Micro)';
 
-      // Clean final text in textarea
       if (els.userNotesInput.value) {
-        els.userNotesInput.value = deduplicateTranscript(els.userNotesInput.value);
+        els.userNotesInput.value = cleanConsecutiveDuplicates(els.userNotesInput.value);
       }
 
       if (toastMessage) {
@@ -1390,7 +1373,6 @@ function initEventListeners() {
       stopRecording();
 
       const initialText = els.userNotesInput.value.trim();
-      let sessionFinalText = '';
 
       const rec = new SpeechRecognition();
       rec.continuous = true;
@@ -1415,26 +1397,25 @@ function initEventListeners() {
       rec.onresult = (event) => {
         resetSilenceTimer();
 
+        let sessionFinal = '';
         let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+
+        for (let i = 0; i < event.results.length; i++) {
           const item = event.results[i];
-          const text = (item[0]?.transcript || '').trim();
+          const text = cleanConsecutiveDuplicates(item[0]?.transcript || '');
           if (!text) continue;
+
           if (item.isFinal) {
-            if (!sessionFinalText.endsWith(text)) {
-              sessionFinalText += (sessionFinalText ? ' ' : '') + text;
-            }
+            sessionFinal = mergeTranscripts(sessionFinal, text);
           } else {
-            interim += (interim ? ' ' : '') + text;
+            interim = mergeTranscripts(interim, text);
           }
         }
 
-        const cleanFinal = deduplicateTranscript(sessionFinalText);
-        const cleanInterim = deduplicateTranscript(interim);
-        const currentDictation = [cleanFinal, cleanInterim].filter(Boolean).join(' ');
-        const combined = initialText ? `${initialText} ${currentDictation}` : currentDictation;
+        const liveSessionText = mergeTranscripts(sessionFinal, interim);
+        const fullText = mergeTranscripts(initialText, liveSessionText);
 
-        els.userNotesInput.value = deduplicateTranscript(combined);
+        els.userNotesInput.value = fullText;
       };
 
       rec.onerror = (e) => {

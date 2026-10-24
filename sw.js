@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garmin-dish-logger-v8';
+const CACHE_NAME = 'garmin-dish-logger-v9';
 const BEACON_GIST_URL = 'https://api.github.com/gists/1d47f9c40ee2ac4743ff81b62351ddad';
 const BEACON_RAW_URL =
   'https://gist.githubusercontent.com/df-ghenry/1d47f9c40ee2ac4743ff81b62351ddad/raw/garmin-dish-logger-beacon.json';
