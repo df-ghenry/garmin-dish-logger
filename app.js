@@ -1280,31 +1280,118 @@ function initEventListeners() {
     });
   }
 
-  // Voice Note (Web Speech API)
+  // Voice Note (Web Speech API) with continuous dictation & pause auto-restart
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.onstart = () => els.voiceNoteBtn.classList.add('recording');
-    recognition.onend = () => els.voiceNoteBtn.classList.remove('recording');
-    recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || '';
-      if (transcript) {
-        const cur = els.userNotesInput.value.trim();
-        els.userNotesInput.value = cur ? `${cur} ${transcript}` : transcript;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || 'fr-FR';
+
+    let isRecording = false;
+    let baseTextBeforeRecording = '';
+    let autoStopTimer = null;
+
+    const stopRecording = () => {
+      isRecording = false;
+      if (autoStopTimer) {
+        clearTimeout(autoStopTimer);
+        autoStopTimer = null;
       }
+      try {
+        recognition.stop();
+      } catch {
+        // Ignore
+      }
+      els.voiceNoteBtn.classList.remove('recording');
+      els.voiceNoteBtn.innerHTML = '🎙️';
+      els.voiceNoteBtn.title = 'Dicter une note vocale (Micro)';
     };
-    els.voiceNoteBtn.addEventListener('click', () => {
+
+    const startRecording = () => {
+      isRecording = true;
+      baseTextBeforeRecording = els.userNotesInput.value.trim();
+      els.voiceNoteBtn.classList.add('recording');
+      els.voiceNoteBtn.innerHTML = '⏹️';
+      els.voiceNoteBtn.title = "Appuyez pour arrêter l'enregistrement";
+
+      // Generous 90s maximum timeout
+      autoStopTimer = setTimeout(() => {
+        if (isRecording) {
+          stopRecording();
+          showToast('Enregistrement vocal terminé (limite de 90s atteinte).');
+        }
+      }, 90000);
+
       try {
         recognition.start();
       } catch {
-        recognition.stop();
+        // If already running
+      }
+    };
+
+    recognition.onstart = () => {
+      els.voiceNoteBtn.classList.add('recording');
+      els.voiceNoteBtn.innerHTML = '⏹️';
+    };
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      let finalized = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const item = event.results[i];
+        const text = item[0]?.transcript || '';
+        if (item.isFinal) {
+          finalized += text + ' ';
+        } else {
+          interim += text;
+        }
+      }
+
+      if (finalized) {
+        baseTextBeforeRecording = baseTextBeforeRecording
+          ? `${baseTextBeforeRecording} ${finalized.trim()}`
+          : finalized.trim();
+      }
+
+      const combined = (baseTextBeforeRecording + (interim ? ` ${interim.trim()}` : '')).trim();
+      els.userNotesInput.value = combined;
+    };
+
+    recognition.onerror = (e) => {
+      console.warn('Speech recognition error:', e.error);
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        stopRecording();
+        showToast('Accès au micro refusé. Veuillez autoriser le micro dans votre navigateur.', { isError: true });
+      }
+    };
+
+    recognition.onend = () => {
+      // Chrome on Android drops recognition on short silence pauses; auto-resume if user didn't tap stop
+      if (isRecording) {
+        try {
+          recognition.start();
+        } catch {
+          // If restart fails, stop cleanly
+          stopRecording();
+        }
+      } else {
+        stopRecording();
+      }
+    };
+
+    els.voiceNoteBtn.addEventListener('click', () => {
+      if (isRecording) {
+        stopRecording();
+        showToast('Note vocale enregistrée.');
+      } else {
+        startRecording();
+        showToast('🎙️ Enregistrement en cours... Parlez librement, appuyez sur ⏹️ pour terminer.');
       }
     });
   } else {
     els.voiceNoteBtn.addEventListener('click', () => {
-      showToast('Voice dictation is supported in Chrome on Android/Desktop.', { isError: true });
+      showToast('La dictée vocale est supportée dans Chrome sur Android / Desktop.', { isError: true });
     });
   }
 
