@@ -1280,35 +1280,78 @@ function initEventListeners() {
     });
   }
 
-  // Voice Note (Web Speech API) with natural pause tolerance and no duplication
+  // Voice Note (Web Speech API) - Clean single session, deduplicated text, no infinite loop
+  function deduplicateTranscript(text) {
+    if (!text) return '';
+    let clean = text.replace(/\s+/g, ' ').trim();
+    let words = clean.split(' ');
+    if (words.length <= 1) return clean;
+
+    const normalize = (w) => w.toLowerCase().replace(/[.,!?;:]/g, '');
+
+    // Pass 1: Remove immediate consecutive identical words (e.g. "salade salade")
+    const pass1 = [];
+    for (let i = 0; i < words.length; i++) {
+      if (i > 0 && normalize(words[i]) === normalize(words[i - 1])) {
+        continue;
+      }
+      pass1.push(words[i]);
+    }
+    words = pass1;
+    if (words.length <= 1) return words.join(' ');
+
+    // Pass 2: Remove immediate consecutive identical phrases (e.g. "salade césar salade césar")
+    const out = [];
+    let i = 0;
+    while (i < words.length) {
+      let matchedLen = 0;
+      let repeatCount = 1;
+      const maxLen = Math.min(12, Math.floor((words.length - i) / 2));
+
+      for (let len = maxLen; len >= 2; len--) {
+        let count = 1;
+        while (i + (count + 1) * len <= words.length) {
+          let isMatch = true;
+          for (let j = 0; j < len; j++) {
+            if (normalize(words[i + j]) !== normalize(words[i + count * len + j])) {
+              isMatch = false;
+              break;
+            }
+          }
+          if (isMatch) {
+            count++;
+          } else {
+            break;
+          }
+        }
+        if (count > 1) {
+          matchedLen = len;
+          repeatCount = count;
+          break;
+        }
+      }
+
+      if (matchedLen > 0) {
+        for (let j = 0; j < matchedLen; j++) {
+          out.push(words[i + j]);
+        }
+        i += matchedLen * repeatCount;
+      } else {
+        out.push(words[i]);
+        i++;
+      }
+    }
+    return out.join(' ');
+  }
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || 'fr-FR';
-
-    let isRecording = false;
-    let initialTextBeforeSession = '';
-    let accumulatedFinalText = '';
-    let currentSessionFinalText = '';
+    let activeRecognition = null;
     let silenceTimer = null;
     let maxSessionTimer = null;
-    const SILENCE_TIMEOUT_MS = 5000; // Auto-stop after 5 seconds of silence
+    const SILENCE_TIMEOUT_MS = 6000;
 
-    const resetSilenceTimer = () => {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      if (!isRecording) return;
-      silenceTimer = setTimeout(() => {
-        if (isRecording) {
-          stopRecording();
-          showToast('Fin de dictée (silence détecté).');
-        }
-      }, SILENCE_TIMEOUT_MS);
-    };
-
-    const stopRecording = () => {
-      isRecording = false;
+    const stopRecording = (toastMessage) => {
       if (silenceTimer) {
         clearTimeout(silenceTimer);
         silenceTimer = null;
@@ -1317,108 +1360,123 @@ function initEventListeners() {
         clearTimeout(maxSessionTimer);
         maxSessionTimer = null;
       }
-      try {
-        recognition.stop();
-      } catch {
-        // Ignore
+
+      const rec = activeRecognition;
+      activeRecognition = null;
+
+      if (rec) {
+        try {
+          rec.stop();
+        } catch {
+          // Ignore
+        }
       }
+
       els.voiceNoteBtn.classList.remove('recording');
       els.voiceNoteBtn.innerHTML = '🎙️';
       els.voiceNoteBtn.title = 'Dicter une note vocale (Micro)';
+
+      // Clean final text in textarea
+      if (els.userNotesInput.value) {
+        els.userNotesInput.value = deduplicateTranscript(els.userNotesInput.value);
+      }
+
+      if (toastMessage) {
+        showToast(toastMessage);
+      }
     };
 
     const startRecording = () => {
-      isRecording = true;
-      initialTextBeforeSession = els.userNotesInput.value.trim();
-      accumulatedFinalText = '';
-      currentSessionFinalText = '';
+      stopRecording();
 
-      els.voiceNoteBtn.classList.add('recording');
-      els.voiceNoteBtn.innerHTML = '⏹️';
-      els.voiceNoteBtn.title = 'Appuyez pour terminer la dictée';
+      const initialText = els.userNotesInput.value.trim();
+      let sessionFinalText = '';
 
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || 'fr-FR';
+
+      const resetSilenceTimer = () => {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          if (activeRecognition === rec) {
+            stopRecording('Fin de dictée (silence détecté).');
+          }
+        }, SILENCE_TIMEOUT_MS);
+      };
+
+      rec.onstart = () => {
+        els.voiceNoteBtn.classList.add('recording');
+        els.voiceNoteBtn.innerHTML = '⏹️';
+        els.voiceNoteBtn.title = 'Appuyez pour terminer la dictée';
+      };
+
+      rec.onresult = (event) => {
+        resetSilenceTimer();
+
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          const text = (item[0]?.transcript || '').trim();
+          if (!text) continue;
+          if (item.isFinal) {
+            if (!sessionFinalText.endsWith(text)) {
+              sessionFinalText += (sessionFinalText ? ' ' : '') + text;
+            }
+          } else {
+            interim += (interim ? ' ' : '') + text;
+          }
+        }
+
+        const cleanFinal = deduplicateTranscript(sessionFinalText);
+        const cleanInterim = deduplicateTranscript(interim);
+        const currentDictation = [cleanFinal, cleanInterim].filter(Boolean).join(' ');
+        const combined = initialText ? `${initialText} ${currentDictation}` : currentDictation;
+
+        els.userNotesInput.value = deduplicateTranscript(combined);
+      };
+
+      rec.onerror = (e) => {
+        console.warn('Speech recognition error:', e.error);
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          stopRecording('Accès micro refusé. Veuillez autoriser le micro.');
+        } else if (e.error !== 'no-speech') {
+          stopRecording();
+        }
+      };
+
+      rec.onend = () => {
+        // Recognition ended cleanly (e.g. Android detected pause or user stopped)
+        if (activeRecognition === rec) {
+          stopRecording('Dictée terminée.');
+        }
+      };
+
+      activeRecognition = rec;
       resetSilenceTimer();
 
       // Max safety timeout (60 seconds)
       maxSessionTimer = setTimeout(() => {
-        if (isRecording) {
-          stopRecording();
-          showToast('Fin de dictée (durée maximale de 60s atteinte).');
+        if (activeRecognition === rec) {
+          stopRecording('Fin de dictée (durée maximale de 60s atteinte).');
         }
       }, 60000);
 
       try {
-        recognition.start();
-      } catch {
-        // If already running
-      }
-    };
-
-    recognition.onstart = () => {
-      els.voiceNoteBtn.classList.add('recording');
-      els.voiceNoteBtn.innerHTML = '⏹️';
-    };
-
-    recognition.onresult = (event) => {
-      resetSilenceTimer();
-
-      let sessionFinal = '';
-      let sessionInterim = '';
-
-      for (let i = 0; i < event.results.length; i++) {
-        const item = event.results[i];
-        const text = item[0]?.transcript || '';
-        if (item.isFinal) {
-          sessionFinal += (sessionFinal ? ' ' : '') + text.trim();
-        } else {
-          sessionInterim += (sessionInterim ? ' ' : '') + text.trim();
-        }
-      }
-
-      currentSessionFinalText = sessionFinal;
-
-      // Build full clean text without any duplication:
-      const parts = [];
-      if (initialTextBeforeSession) parts.push(initialTextBeforeSession);
-      if (accumulatedFinalText) parts.push(accumulatedFinalText);
-      if (currentSessionFinalText) parts.push(currentSessionFinalText);
-      if (sessionInterim) parts.push(sessionInterim);
-
-      els.userNotesInput.value = parts.join(' ').trim();
-    };
-
-    recognition.onerror = (e) => {
-      console.warn('Speech recognition error:', e.error);
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        stopRecording();
-        showToast('Accès au micro refusé. Veuillez autoriser le micro dans votre navigateur.', { isError: true });
-      }
-    };
-
-    recognition.onend = () => {
-      // If recognition ended but user was still in the silence window (< 5s since last word):
-      if (isRecording) {
-        if (currentSessionFinalText) {
-          accumulatedFinalText = (accumulatedFinalText ? `${accumulatedFinalText} ` : '') + currentSessionFinalText;
-          currentSessionFinalText = '';
-        }
-        try {
-          recognition.start();
-        } catch {
-          stopRecording();
-        }
-      } else {
-        stopRecording();
+        rec.start();
+        showToast('🎙️ Dictée active... Parlez, puis appuyez sur ⏹️ quand vous avez fini.');
+      } catch (err) {
+        console.error('Failed to start speech recognition:', err);
+        stopRecording('Impossible de démarrer le micro.');
       }
     };
 
     els.voiceNoteBtn.addEventListener('click', () => {
-      if (isRecording) {
-        stopRecording();
-        showToast('Dictée enregistrée.');
+      if (activeRecognition) {
+        stopRecording('Dictée enregistrée.');
       } else {
         startRecording();
-        showToast('🎙️ Dictée active... Parlez librement, arrêt automatique après 5s de silence.');
       }
     });
   } else {
