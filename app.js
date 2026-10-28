@@ -1,4 +1,5 @@
 // Garmin Dish Logger Frontend Application
+import { directGarmin } from './garmin-client.js';
 
 const BEACON_GIST_URL = 'https://api.github.com/gists/1d47f9c40ee2ac4743ff81b62351ddad';
 const BEACON_RAW_URL =
@@ -35,9 +36,15 @@ function updateLaptopBadge(status, details = '') {
     els.laptopStatusBadge.textContent = details ? `● ${details}` : '● Connecting...';
     els.laptopStatusBadge.title = 'Searching for laptop backend...';
   } else {
-    els.laptopStatusBadge.className = 'badge badge-warn';
-    els.laptopStatusBadge.textContent = '⚠️ Laptop Offline · Tap to Retry';
-    els.laptopStatusBadge.title = 'Click to force search for your laptop backend';
+    if (directGarmin.isConnected() && (localStorage.getItem('gdl_gemini_key') || state.geminiConfigured)) {
+      els.laptopStatusBadge.className = 'badge badge-success';
+      els.laptopStatusBadge.textContent = '● Standalone (Phone Direct)';
+      els.laptopStatusBadge.title = 'Running directly on phone without laptop';
+    } else {
+      els.laptopStatusBadge.className = 'badge badge-warn';
+      els.laptopStatusBadge.textContent = '⚠️ Laptop Offline · Tap to Retry';
+      els.laptopStatusBadge.title = 'Click to force search for your laptop backend';
+    }
   }
 }
 
@@ -325,6 +332,19 @@ const els = {
   testKeyBtn: document.getElementById('testKeyBtn'),
   saveSettingsBtn: document.getElementById('saveSettingsBtn'),
 
+  garminAccountBadge: document.getElementById('garminAccountBadge'),
+  garminConnectedBox: document.getElementById('garminConnectedBox'),
+  garminConnectedName: document.getElementById('garminConnectedName'),
+  garminDisconnectBtn: document.getElementById('garminDisconnectBtn'),
+  garminLoginFormBox: document.getElementById('garminLoginFormBox'),
+  garminEmailInput: document.getElementById('garminEmailInput'),
+  garminPasswordInput: document.getElementById('garminPasswordInput'),
+  garminLoginBtn: document.getElementById('garminLoginBtn'),
+  garminMfaGroup: document.getElementById('garminMfaGroup'),
+  garminMfaInput: document.getElementById('garminMfaInput'),
+  garminVerifyMfaBtn: document.getElementById('garminVerifyMfaBtn'),
+  garminLoginResultBox: document.getElementById('garminLoginResultBox'),
+
   qrModal: document.getElementById('qrModal'),
   closeQrBtn: document.getElementById('closeQrBtn'),
   qrSvgContainer: document.getElementById('qrSvgContainer'),
@@ -450,15 +470,56 @@ function clearSelectedPhoto() {
   els.captureButtonsView.classList.remove('hidden');
 }
 
+// Render Garmin Account Settings UI in Modal
+function renderGarminAccountSettings() {
+  if (!els.garminAccountBadge) return;
+  if (directGarmin.isConnected()) {
+    const p = directGarmin.getProfile();
+    els.garminAccountBadge.className = 'badge badge-success';
+    els.garminAccountBadge.textContent = '● Connected';
+    els.garminConnectedBox.classList.remove('hidden');
+    els.garminLoginFormBox.classList.add('hidden');
+    els.garminConnectedName.textContent = p?.fullName || p?.displayName || 'Garmin User';
+    els.garminStatusBadge.className = 'badge badge-success';
+    els.garminStatusBadge.textContent = `● Garmin: ${p?.fullName || p?.displayName || 'Connected'}`;
+  } else {
+    els.garminAccountBadge.className = 'badge badge-neutral';
+    els.garminAccountBadge.textContent = '● Disconnected';
+    els.garminConnectedBox.classList.add('hidden');
+    els.garminLoginFormBox.classList.remove('hidden');
+  }
+}
+
 // Fetch App Status (Garmin + Gemini + QR)
 async function fetchAppStatus() {
+  // Always update direct mobile state first
+  renderGarminAccountSettings();
+
   try {
     const res = await apiFetch('/api/status');
     const data = await res.json();
 
-    if (data.garmin?.connected) {
+    if (directGarmin.isConnected()) {
+      const p = directGarmin.getProfile();
+      els.garminStatusBadge.className = 'badge badge-success';
+      els.garminStatusBadge.textContent = `● Garmin: ${p?.fullName || p?.displayName || 'Connected'}`;
+    } else if (data.garmin?.connected) {
       els.garminStatusBadge.className = 'badge badge-success';
       els.garminStatusBadge.textContent = `● Garmin Connected · ${data.garmin.displayName}`;
+      // Auto-import tokens from laptop to phone direct client
+      try {
+        const tokRes = await apiFetch('/api/garmin/tokens');
+        if (tokRes.ok) {
+          const tokData = await tokRes.json();
+          if (tokData?.oauth1 && tokData?.oauth2) {
+            directGarmin.importTokens(tokData.oauth1, tokData.oauth2, tokData.profile);
+            renderGarminAccountSettings();
+            updateLaptopBadge('connected');
+          }
+        }
+      } catch {
+        // Ignore
+      }
     } else {
       els.garminStatusBadge.className = 'badge badge-warn';
       els.garminStatusBadge.textContent = '⚠️ Garmin Disconnected';
@@ -541,9 +602,14 @@ async function fetchAppStatus() {
 async function fetchGarminNutrition(dateStr = state.selectedDate) {
   els.refreshGarminBtn.disabled = true;
   try {
-    const res = await apiFetch(`/api/nutrition?date=${encodeURIComponent(dateStr)}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to fetch Garmin nutrition');
+    let data;
+    if (directGarmin.isConnected()) {
+      data = await directGarmin.getDailyNutrition(dateStr);
+    } else {
+      const res = await apiFetch(`/api/nutrition?date=${encodeURIComponent(dateStr)}`);
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch Garmin nutrition');
+    }
     state.garminOverview = data;
     renderGarminDashboard(data);
   } catch (err) {
@@ -664,14 +730,20 @@ function renderGarminDashboard(overview) {
 
 async function deleteGarminFoodEntry(dateStr, logId, foodName) {
   try {
-    const res = await apiFetch(
-      `/api/garmin/log/${encodeURIComponent(dateStr)}/${encodeURIComponent(logId)}`,
-      { method: 'DELETE' },
-    );
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to delete entry');
-    state.garminOverview = data.overview;
-    renderGarminDashboard(data.overview);
+    let overview;
+    if (directGarmin.isConnected()) {
+      overview = await directGarmin.deleteFoodLogEntry(dateStr, logId);
+    } else {
+      const res = await apiFetch(
+        `/api/garmin/log/${encodeURIComponent(dateStr)}/${encodeURIComponent(logId)}`,
+        { method: 'DELETE' },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete entry');
+      overview = data.overview;
+    }
+    state.garminOverview = overview;
+    renderGarminDashboard(overview);
     showToast(`Removed "${foodName}" from Garmin Connect.`);
   } catch (err) {
     showToast(`Delete failed: ${err.message}`, { isError: true });
@@ -963,27 +1035,48 @@ async function logCurrentDishToGarmin() {
   els.logToGarminBtn.innerHTML = '<span>⏳ Pushing to Garmin Connect...</span>';
 
   try {
-    const res = await apiFetch('/api/garmin/log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    let data;
+    if (directGarmin.isConnected()) {
+      const overview = await directGarmin.quickAddDish({
         name: dishName,
         calories,
         protein,
         carbs,
         fat,
         fiber: state.currentAnalysis.fiber || 0,
-        totalGrams: state.currentAnalysis.totalGrams || 350,
+        grams: state.currentAnalysis.totalGrams || 350,
         meal: state.selectedMeal,
         date: state.selectedDate,
         saveCustomFood: els.saveCustomFoodCheckbox.checked,
-        ingredients: state.currentAnalysis.ingredients,
-        thumbnailDataUrl: state.thumbnailDataUrl,
-      }),
-    });
+      });
+      data = {
+        overview,
+        mealName: state.selectedMeal,
+        logId: null,
+      };
+    } else {
+      const res = await apiFetch('/api/garmin/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: dishName,
+          calories,
+          protein,
+          carbs,
+          fat,
+          fiber: state.currentAnalysis.fiber || 0,
+          totalGrams: state.currentAnalysis.totalGrams || 350,
+          meal: state.selectedMeal,
+          date: state.selectedDate,
+          saveCustomFood: els.saveCustomFoodCheckbox.checked,
+          ingredients: state.currentAnalysis.ingredients,
+          thumbnailDataUrl: state.thumbnailDataUrl,
+        }),
+      });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to log to Garmin Connect');
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to log to Garmin Connect');
+    }
 
     state.garminOverview = data.overview;
     renderGarminDashboard(data.overview);
@@ -1650,6 +1743,90 @@ function initEventListeners() {
       showToast(err.message, { isError: true });
     }
   });
+
+  // Direct Garmin Login
+  if (els.garminLoginBtn) {
+    els.garminLoginBtn.addEventListener('click', async () => {
+      const email = els.garminEmailInput.value.trim();
+      const password = els.garminPasswordInput.value;
+      if (!email || !password) {
+        showToast('Please enter your Garmin email and password.', { isError: true });
+        return;
+      }
+      els.garminLoginBtn.disabled = true;
+      els.garminLoginBtn.textContent = 'Connecting to Garmin...';
+      els.garminLoginResultBox.classList.add('hidden');
+
+      try {
+        const result = await directGarmin.loginWithCredentials(email, password);
+        if (result.mfaRequired) {
+          els.garminMfaGroup.classList.remove('hidden');
+          els.garminLoginResultBox.classList.remove('hidden');
+          els.garminLoginResultBox.style.background = 'rgba(56, 189, 248, 0.16)';
+          els.garminLoginResultBox.style.color = '#38bdf8';
+          els.garminLoginResultBox.textContent = result.message || 'MFA code sent to your phone/email.';
+          els.garminLoginBtn.classList.add('hidden');
+          showToast('Please enter the MFA security code sent to you.');
+        } else if (result.success) {
+          renderGarminAccountSettings();
+          showToast(`✓ Connected to Garmin Connect (${result.profile?.displayName || 'User'})!`);
+          await fetchGarminNutrition();
+        }
+      } catch (err) {
+        els.garminLoginResultBox.classList.remove('hidden');
+        els.garminLoginResultBox.style.background = 'rgba(239, 68, 68, 0.18)';
+        els.garminLoginResultBox.style.color = '#fca5a5';
+        els.garminLoginResultBox.textContent = `Login failed: ${err.message}`;
+        showToast(`Garmin login failed: ${err.message}`, { isError: true });
+      } finally {
+        els.garminLoginBtn.disabled = false;
+        els.garminLoginBtn.textContent = 'Connect to Garmin';
+      }
+    });
+  }
+
+  // Verify MFA
+  if (els.garminVerifyMfaBtn) {
+    els.garminVerifyMfaBtn.addEventListener('click', async () => {
+      const mfaCode = els.garminMfaInput.value.trim();
+      if (!mfaCode) {
+        showToast('Please enter the MFA code', { isError: true });
+        return;
+      }
+      els.garminVerifyMfaBtn.disabled = true;
+      els.garminVerifyMfaBtn.textContent = 'Verifying...';
+
+      try {
+        const result = await directGarmin.loginWithCredentials('', '', mfaCode);
+        if (result.success) {
+          els.garminMfaGroup.classList.add('hidden');
+          els.garminLoginBtn.classList.remove('hidden');
+          renderGarminAccountSettings();
+          showToast(`✓ Garmin connected successfully!`);
+          await fetchGarminNutrition();
+        }
+      } catch (err) {
+        els.garminLoginResultBox.classList.remove('hidden');
+        els.garminLoginResultBox.style.background = 'rgba(239, 68, 68, 0.18)';
+        els.garminLoginResultBox.style.color = '#fca5a5';
+        els.garminLoginResultBox.textContent = `MFA failed: ${err.message}`;
+        showToast(err.message, { isError: true });
+      } finally {
+        els.garminVerifyMfaBtn.disabled = false;
+        els.garminVerifyMfaBtn.textContent = 'Verify';
+      }
+    });
+  }
+
+  // Disconnect Garmin
+  if (els.garminDisconnectBtn) {
+    els.garminDisconnectBtn.addEventListener('click', () => {
+      directGarmin.logout();
+      renderGarminAccountSettings();
+      els.garminPasswordInput.value = '';
+      showToast('Disconnected from Garmin Connect.');
+    });
+  }
 }
 
 function copyToClipboard(text, toastMessage) {

@@ -446,6 +446,70 @@
         </div>
 
         <div id="keyTestResultBox" class="test-result-box hidden"></div>
+
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0 1rem 0;" />
+
+        <!-- Garmin Connect Account Section (Direct Phone Login) -->
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <label class="input-label" style="margin-bottom:0;">🏃 Garmin Connect Account</label>
+            <span id="garminAccountBadge" class="badge badge-neutral">● Disconnected</span>
+          </div>
+
+          <!-- Connected State View -->
+          <div id="garminConnectedBox" class="hidden" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong style="color: #10b981;">✓ Connected to Garmin</strong>
+                <div id="garminConnectedName" style="font-size: 0.85rem; color: #94a3b8;">ghenry69</div>
+              </div>
+              <button type="button" id="garminDisconnectBtn" class="btn btn-xs btn-outline" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;">Disconnect</button>
+            </div>
+          </div>
+
+          <!-- Disconnected / Login Form View -->
+          <div id="garminLoginFormBox">
+            <p class="form-hint" style="margin-bottom: 0.5rem;">
+              Log in once to connect your Garmin account directly on this phone. No laptop or server required.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <input
+                type="email"
+                id="garminEmailInput"
+                class="text-input"
+                placeholder="Garmin Connect Email"
+                autocomplete="email"
+              />
+              <input
+                type="password"
+                id="garminPasswordInput"
+                class="text-input"
+                placeholder="Garmin Connect Password"
+                autocomplete="current-password"
+              />
+              <div id="garminMfaGroup" class="hidden" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.5rem;">
+                <label for="garminMfaInput" class="input-label" style="font-size: 0.8rem; color: #38bdf8;">
+                  🔑 Enter 6-digit MFA Code sent to your phone/email:
+                </label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input
+                    type="text"
+                    id="garminMfaInput"
+                    class="text-input"
+                    placeholder="123456"
+                    maxlength="8"
+                    inputmode="numeric"
+                  />
+                  <button type="button" id="garminVerifyMfaBtn" class="btn btn-sm btn-primary">Verify</button>
+                </div>
+              </div>
+              <button type="button" id="garminLoginBtn" class="btn btn-sm btn-primary" style="margin-top: 0.25rem;">
+                Connect to Garmin
+              </button>
+            </div>
+          </div>
+          <div id="garminLoginResultBox" class="test-result-box hidden" style="margin-top: 0.5rem;"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" id="testKeyBtn" class="btn btn-outline">Test API Key</button>
@@ -469,6 +533,26 @@
           <button type="button" id="modalNativeInstallBtn" class="btn btn-primary btn-block">
             📲 Install Android App Now
           </button>
+        </div>
+
+        <!-- Standalone Native Android APK Option -->
+        <div class="install-method-box" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.08); margin-bottom: 1rem; border-radius: 8px; padding: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong style="color: #38bdf8; font-size: 1rem;">📦 Standalone Android App (No Laptop Required)</strong>
+            <span class="badge badge-primary">Option 4</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.4; margin-bottom: 0.75rem;">
+            Runs 100% autonomously on your Android phone. Connects directly to Garmin Connect and Gemini Vision without needing your laptop or any cloud server.
+          </p>
+          <a
+            id="apkDownloadLink"
+            href="https://github.com/df-ghenry/garmin-dish-logger/releases/download/apk-latest/DishLogger.apk"
+            class="btn btn-primary btn-block"
+            style="text-decoration: none; text-align: center; display: block;"
+            download="DishLogger.apk"
+          >
+            📲 Download DishLogger.apk
+          </a>
         </div>
 
         <div class="qr-row">
