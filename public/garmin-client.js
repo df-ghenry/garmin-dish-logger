@@ -638,6 +638,56 @@ class DirectGarminClient {
     };
   }
 
+  resolveMealAndTime(meals, requestedMeal, requestedTime) {
+    const padTime = (t) => {
+      const clean = String(t || '').trim();
+      return clean.length === 5 ? `${clean}:00` : clean;
+    };
+
+    const within = (m, t) => {
+      return Boolean(m.startTime && m.endTime && padTime(m.startTime) <= t && t <= padTime(m.endTime));
+    };
+
+    const addMinute = (t) => {
+      const [h, m] = t.split(':').map(Number);
+      const total = Math.min(h * 60 + m + 1, 23 * 60 + 59);
+      return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}:00`;
+    };
+
+    const mealName = requestedMeal || 'LUNCH';
+    const chosen = meals.find((m) => m.mealName === mealName) || meals[0] || { mealId: 1, mealName };
+    const others = meals.filter((m) => m !== chosen);
+
+    // Garmin enforces that SNACKS time must NOT fall inside BREAKFAST, LUNCH, or DINNER windows
+    const fitsChosen = (t) => {
+      if (chosen.mealName === 'SNACKS') {
+        return !others.some((m) => m.mealName !== 'SNACKS' && within(m, t));
+      }
+      return chosen.startTime && chosen.endTime ? within(chosen, t) : true;
+    };
+
+    if (requestedTime) {
+      const formatted = padTime(requestedTime);
+      if (fitsChosen(formatted)) {
+        return { mealId: chosen.mealId, mealTime: formatted, mealName: chosen.mealName };
+      }
+    }
+
+    const ownStart = chosen.startTime ? [padTime(chosen.startTime)] : [];
+    const gapsAfterMeals = others
+      .filter((m) => m.endTime)
+      .map((m) => addMinute(padTime(m.endTime)))
+      .sort();
+
+    const candidates =
+      chosen.mealName === 'SNACKS'
+        ? ['15:30:00', '16:00:00', '10:30:00', ...gapsAfterMeals]
+        : [...ownStart, '12:30:00', '19:00:00', '08:00:00'];
+
+    const picked = candidates.find((t) => fitsChosen(t)) || (chosen.mealName === 'SNACKS' ? '15:30:00' : (ownStart[0] || '12:30:00'));
+    return { mealId: chosen.mealId, mealTime: picked, mealName: chosen.mealName };
+  }
+
   // Quick Add Dish directly to Garmin Connect
   async quickAddDish(input) {
     const resolvedDate = input.date || new Date().toISOString().slice(0, 10);
@@ -650,9 +700,8 @@ class DirectGarminClient {
     // Resolve meal windows
     const mealsRes = await this.request(`/nutrition-service/meals/${resolvedDate}`).catch(() => ({ meals: [] }));
     const meals = mealsRes?.meals || [];
-    const chosen = meals.find((m) => m.mealName === (input.meal || 'LUNCH')) || meals[0] || { mealId: 1, mealName: 'LUNCH' };
+    const { mealId, mealTime, mealName } = this.resolveMealAndTime(meals, input.meal, input.time);
 
-    const mealTime = chosen.startTime ? `${chosen.startTime.slice(0, 5)}:00` : '12:30:00';
     const logTimestamp = `${new Date().toISOString().slice(0, 19)}.000Z`;
 
     await this.request('/nutrition-service/food/logs/quickAdd', {
@@ -667,7 +716,7 @@ class DirectGarminClient {
             logSource: 'GCW',
             logCategory: 'QUICK_ADD',
             mealTime,
-            mealId: chosen.mealId,
+            mealId,
             action: 'ADD',
             calories: String(calories),
             carbs: String(carbs),
