@@ -1,0 +1,83 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Release Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build backend & sync Capacitor
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build Android APK (Debug)
+        run: |
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Prepare Release Artifact
+        run: |
+          mkdir -p release-artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk release-artifacts/DishLogger.apk
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DishLogger-APK
+          path: release-artifacts/DishLogger.apk
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: apk-latest
+          name: Dish Logger Android App (Latest APK)
+          body: |
+            ## 📱 Dish Logger — Standalone Android App
+            
+            This standalone Android APK runs 100% on your Android phone without needing your laptop or any cloud server.
+            
+            ### Installation:
+            1. Tap **DishLogger.apk** below to download on your phone.
+            2. Open the downloaded file and tap **Install**.
+            3. Open **Dish Logger**, tap ⚙️ **Settings**, enter your Garmin credentials and Gemini API key.
+          files: release-artifacts/DishLogger.apk
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

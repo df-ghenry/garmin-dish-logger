@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Garmin Dish Logger · Gemini Nutrition</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand">
+        <img src="icon-192.png" alt="Dish Logger" class="brand-icon" />
+        <div>
+          <h1 class="brand-title">Garmin Dish Logger</h1>
+          <div class="status-badges">
+            <span id="laptopStatusBadge" class="badge badge-warn" role="button" tabindex="0" title="Tap to check connection to your laptop">● Connecting...</span>
+            <span id="garminStatusBadge" class="badge badge-neutral">● Checking Garmin...</span>
+            <span id="geminiStatusBadge" class="badge badge-neutral" role="button" tabindex="0">● Checking Gemini...</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="installPwaBtn" class="btn btn-sm btn-primary" title="Install as Android App on your Pixel">
+          <span>📲</span>
+          <span>Install App</span>
+        </button>
+        <button id="openQrBtn" class="icon-btn" title="Open on Google Pixel Phone (QR Code &amp; Android Install)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 19h3M19 14v3"/>
+          </svg>
+          <span class="btn-label-desktop">Pixel App</span>
+        </button>
+        <button id="openSettingsBtn" class="icon-btn" title="Gemini API Key &amp; Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0-4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span class="btn-label-desktop">Settings</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Android App Install Banner -->
+    <div id="androidInstallBanner" class="install-banner hidden">
+      <div class="install-banner-left">
+        <img src="/icon-192.png" alt="App Icon" class="install-banner-icon" />
+        <div>
+          <strong>📲 Install Garmin Dish Logger on your Pixel</strong>
+          <p id="installBannerSub">Install as a standalone Android app with native Share Sheet &amp; home screen launcher.</p>
+        </div>
+      </div>
+      <button id="bannerInstallBtn" class="btn btn-sm btn-primary">Install Now</button>
+    </div>
+
+    <!-- API Key Setup Banner (hidden once configured) -->
+    <div id="apiKeyBanner" class="setup-banner hidden">
+      <div class="setup-banner-text">
+        <strong>🔑 Gemini API Key Needed for Live Photo Analysis:</strong>
+        <span>Paste your Gemini API key in Settings, or click any <em>Sample Dish</em> below to test the preview &amp; Garmin Connect sync right away.</span>
+      </div>
+      <button id="bannerOpenSettingsBtn" class="btn btn-sm btn-accent">Configure Key</button>
+    </div>
+
+    <!-- Main Grid Layout -->
+    <main class="main-grid">
+      <!-- Left Column: Snap & Preview -->
+      <section class="col-primary">
+        <!-- 1. Capture & Analyze Card -->
+        <div class="card capture-card">
+          <div class="card-header">
+            <h2>📸 Snap or Describe Your Dish</h2>
+            <span class="subtle-tag">Gemini Vision → Garmin Connect</span>
+          </div>
+
+          <!-- Hidden File Inputs -->
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" class="sr-only" />
+          <input type="file" id="galleryInput" accept="image/*" class="sr-only" />
+
+          <!-- Dropzone / Capture Buttons -->
+          <div id="dropZone" class="capture-dropzone">
+            <div id="captureButtonsView" class="capture-buttons-grid">
+              <button type="button" id="snapCameraBtn" class="capture-big-btn capture-camera">
+                <span class="capture-icon">📷</span>
+                <span class="capture-title">Take Photo</span>
+                <span class="capture-sub">Open Pixel camera</span>
+              </button>
+              <button type="button" id="pickGalleryBtn" class="capture-big-btn capture-gallery">
+                <span class="capture-icon">🖼️</span>
+                <span class="capture-title">Choose / Drop Photo</span>
+                <span class="capture-sub">Gallery or Share Sheet</span>
+              </button>
+            </div>
+
+            <!-- Selected Image Preview -->
+            <div id="photoPreviewContainer" class="photo-preview-container hidden">
+              <img id="photoPreviewImg" src="" alt="Selected dish preview" class="photo-preview-img" />
+              <div class="photo-preview-overlay">
+                <span id="photoSizeBadge" class="photo-size-badge">Ready</span>
+                <button type="button" id="clearPhotoBtn" class="btn btn-sm btn-danger-ghost">✕ Remove Photo</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Optional Context / Voice Input -->
+          <div class="context-box">
+            <label for="userNotesInput" class="input-label">
+              Optional Context / Portion Note <span class="muted">(or describe a meal without a photo)</span>
+            </label>
+            <div class="context-input-row">
+              <input
+                type="text"
+                id="userNotesInput"
+                class="text-input"
+                placeholder="e.g. Half portion, cooked in 1 tbsp olive oil, vegetarian, 180g pasta..."
+              />
+              <button type="button" id="voiceNoteBtn" class="icon-btn voice-btn" title="Dictate note (Voice)">
+                🎙️
+              </button>
+            </div>
+            <div class="quick-chips">
+              <button type="button" class="chip" data-note="Half portion (50%)">½ Portion</button>
+              <button type="button" class="chip" data-note="Vegetarian dish">🌱 Vegetarian</button>
+              <button type="button" class="chip" data-note="Cooked with 1 tbsp olive oil">🫒 +1 tbsp Olive Oil</button>
+              <button type="button" class="chip" data-note="Restaurant generous portion">🍽️ Restaurant Portion</button>
+              <button type="button" class="chip" data-note="Light dressing, no added butter">🥗 Light Preparation</button>
+            </div>
+          </div>
+
+          <!-- Primary Analyze CTA -->
+          <div class="analyze-actions">
+            <button type="button" id="analyzeBtn" class="btn btn-primary btn-lg btn-block">
+              <span id="analyzeBtnIcon">✨</span>
+              <span id="analyzeBtnText">Compute Calories &amp; Macros with Gemini</span>
+            </button>
+          </div>
+
+          <!-- Sample / Demo Presets -->
+          <div class="demo-bar">
+            <span class="demo-label">Instant test dishes:</span>
+            <div class="demo-buttons">
+              <button type="button" class="chip chip-demo" data-preset="0">🥗 Halloumi Quinoa Bowl</button>
+              <button type="button" class="chip chip-demo" data-preset="1">🍄 Mushroom Risotto</button>
+              <button type="button" class="chip chip-demo" data-preset="2">🥣 Skyr Berry Bowl</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Interactive Preview & Confirm Card (Hidden until analysis completes) -->
+        <div id="previewCard" class="card preview-card hidden">
+          <div class="card-header preview-header">
+            <div>
+              <h2>🔍 Review &amp; Adjust Before Logging</h2>
+              <p id="previewDescription" class="preview-desc"></p>
+            </div>
+            <div class="preview-badges">
+              <span id="confidenceBadge" class="badge badge-success">High Confidence</span>
+            </div>
+          </div>
+
+          <!-- Health Tip Callout -->
+          <div id="healthTipBox" class="health-tip-box hidden">
+            <span class="tip-icon">💡</span>
+            <span id="healthTipText"></span>
+          </div>
+
+          <!-- Dish Name & Target Meal -->
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="dishNameInput" class="input-label">Dish Name (logged to Garmin)</label>
+              <input type="text" id="dishNameInput" class="text-input font-semibold" />
+            </div>
+            <div class="form-group">
+              <label class="input-label">Target Garmin Meal</label>
+              <div class="meal-selector" id="mealSelector">
+                <button type="button" class="meal-pill" data-meal="BREAKFAST">🌅 Breakfast</button>
+                <button type="button" class="meal-pill active" data-meal="LUNCH">☀️ Lunch</button>
+                <button type="button" class="meal-pill" data-meal="DINNER">🌙 Dinner</button>
+                <button type="button" class="meal-pill" data-meal="SNACKS">🍎 Snacks</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Portion Multiplier Slider & Quick Buttons -->
+          <div class="portion-scaler-box">
+            <div class="portion-header">
+              <label for="portionSlider" class="input-label">
+                Portion Multiplier: <strong id="portionMultiplierLabel" class="accent-text">1.00×</strong>
+                <span id="totalWeightLabel" class="muted">(350 g total)</span>
+              </label>
+              <div class="portion-quick-btns">
+                <button type="button" class="portion-btn" data-mult="0.5">0.5×</button>
+                <button type="button" class="portion-btn" data-mult="0.75">0.75×</button>
+                <button type="button" class="portion-btn active" data-mult="1">1×</button>
+                <button type="button" class="portion-btn" data-mult="1.25">1.25×</button>
+                <button type="button" class="portion-btn" data-mult="1.5">1.5×</button>
+                <button type="button" class="portion-btn" data-mult="2">2×</button>
+              </div>
+            </div>
+            <input
+              type="range"
+              id="portionSlider"
+              min="0.25"
+              max="2.5"
+              step="0.05"
+              value="1"
+              class="range-slider"
+            />
+          </div>
+
+          <!-- Editable Macro Totals Strip -->
+          <div class="macro-totals-grid">
+            <div class="macro-box macro-cal">
+              <span class="macro-box-label">Calories</span>
+              <div class="macro-box-input-wrap">
+                <input type="number" id="totalCaloriesInput" min="0" step="1" class="macro-num-input" />
+                <span class="macro-unit">kcal</span>
+              </div>
+            </div>
+            <div class="macro-box macro-pro">
+              <span class="macro-box-label">Protein</span>
+              <div class="macro-box-input-wrap">
+                <input type="number" id="totalProteinInput" min="0" step="1" class="macro-num-input" />
+                <span class="macro-unit">g</span>
+              </div>
+            </div>
+            <div class="macro-box macro-carb">
+              <span class="macro-box-label">Carbs</span>
+              <div class="macro-box-input-wrap">
+                <input type="number" id="totalCarbsInput" min="0" step="1" class="macro-num-input" />
+                <span class="macro-unit">g</span>
+              </div>
+            </div>
+            <div class="macro-box macro-fat">
+              <span class="macro-box-label">Fat</span>
+              <div class="macro-box-input-wrap">
+                <input type="number" id="totalFatInput" min="0" step="1" class="macro-num-input" />
+                <span class="macro-unit">g</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ingredients Breakdown Table -->
+          <div class="ingredients-section">
+            <div class="ingredients-header">
+              <h3>Detected Ingredients &amp; Weights</h3>
+              <button type="button" id="addIngredientBtn" class="btn btn-xs btn-outline">+ Add Item</button>
+            </div>
+            <div class="table-responsive">
+              <table class="ingredients-table">
+                <thead>
+                  <tr>
+                    <th width="32">Use</th>
+                    <th>Component</th>
+                    <th width="85">Weight (g)</th>
+                    <th width="65">kcal</th>
+                    <th width="110">P / C / F (g)</th>
+                    <th width="32"></th>
+                  </tr>
+                </thead>
+                <tbody id="ingredientsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- AI Refinement Bar -->
+          <div class="refine-bar">
+            <input
+              type="text"
+              id="refineInput"
+              class="text-input"
+              placeholder="Ask Gemini to adjust: e.g. 'Sauce is light yogurt not mayo' or 'Add 1 glass of red wine'..."
+            />
+            <button type="button" id="refineBtn" class="btn btn-outline">✨ Refine</button>
+          </div>
+
+          <!-- Save Options & Log to Garmin Button -->
+          <div class="confirm-footer">
+            <label class="checkbox-label">
+              <input type="checkbox" id="saveCustomFoodCheckbox" />
+              <span>Also save to my Garmin Connect Custom Foods catalog</span>
+            </label>
+            <div class="confirm-buttons">
+              <button type="button" id="cancelPreviewBtn" class="btn btn-ghost">Cancel</button>
+              <button type="button" id="logToGarminBtn" class="btn btn-garmin btn-lg">
+                <span>🚀 Feed Directly into Garmin Connect</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Live Garmin Connect Dashboard & Food Log -->
+      <aside class="col-secondary">
+        <!-- 3. Live Garmin Daily Progress Card -->
+        <div class="card garmin-dashboard-card">
+          <div class="card-header">
+            <h2>⌚ Garmin Connect Nutrition</h2>
+            <div class="date-nav">
+              <button type="button" id="prevDateBtn" class="icon-btn-sm" title="Previous day">◀</button>
+              <input type="date" id="selectedDateInput" class="date-input" />
+              <button type="button" id="nextDateBtn" class="icon-btn-sm" title="Next day">▶</button>
+              <button type="button" id="todayDateBtn" class="btn btn-xs btn-outline">Today</button>
+              <button type="button" id="refreshGarminBtn" class="icon-btn-sm" title="Refresh from Garmin Connect">↻</button>
+            </div>
+          </div>
+
+          <!-- Calorie Ring + Macro Bars -->
+          <div class="garmin-overview-grid">
+            <div class="calorie-ring-box">
+              <svg viewBox="0 0 140 140" class="calorie-ring-svg">
+                <circle cx="70" cy="70" r="58" class="ring-bg" />
+                <circle
+                  id="calorieRingCircle"
+                  cx="70"
+                  cy="70"
+                  r="58"
+                  class="ring-progress"
+                  stroke-dasharray="364.4"
+                  stroke-dashoffset="364.4"
+                />
+              </svg>
+              <div class="calorie-ring-center">
+                <span id="ringConsumedVal" class="ring-big-num">0</span>
+                <span class="ring-sub-label">/ <span id="ringGoalVal">1950</span> kcal</span>
+                <span id="ringRemainingBadge" class="ring-rem-badge">1950 left</span>
+              </div>
+            </div>
+
+            <div class="macro-bars-col">
+              <!-- Protein -->
+              <div class="macro-progress-item">
+                <div class="macro-progress-top">
+                  <span class="macro-name"><span class="dot dot-pro"></span>Protein</span>
+                  <span class="macro-vals"><strong id="proConsumedVal">0</strong> / <span id="proGoalVal">141</span>g</span>
+                </div>
+                <div class="progress-track">
+                  <div id="proProgressBar" class="progress-fill fill-pro" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- Carbs -->
+              <div class="macro-progress-item">
+                <div class="macro-progress-top">
+                  <span class="macro-name"><span class="dot dot-carb"></span>Carbs</span>
+                  <span class="macro-vals"><strong id="carbConsumedVal">0</strong> / <span id="carbGoalVal">210</span>g</span>
+                </div>
+                <div class="progress-track">
+                  <div id="carbProgressBar" class="progress-fill fill-carb" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- Fat -->
+              <div class="macro-progress-item">
+                <div class="macro-progress-top">
+                  <span class="macro-name"><span class="dot dot-fat"></span>Fat</span>
+                  <span class="macro-vals"><strong id="fatConsumedVal">0</strong> / <span id="fatGoalVal">61</span>g</span>
+                </div>
+                <div class="progress-track">
+                  <div id="fatProgressBar" class="progress-fill fill-fat" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- Active Burned Strip -->
+              <div class="activity-burn-strip">
+                <span>🔥 Active: <strong id="activeBurnVal">—</strong> kcal</span>
+                <span>👟 Steps: <strong id="stepsVal">—</strong></span>
+                <span>⚡ Total Burn: <strong id="totalBurnVal">—</strong> kcal</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Logged Meals on Garmin Connect for Selected Date -->
+        <div class="card garmin-log-card" id="garminLogSection">
+          <div class="card-header">
+            <h2>📋 Garmin Food Log (<span id="foodLogDateLabel">Today</span>)</h2>
+            <span id="foodLogCountBadge" class="subtle-tag">0 items</span>
+          </div>
+          <div id="garminFoodLogList" class="food-log-list">
+            <div class="empty-state">Loading Garmin Connect food log...</div>
+          </div>
+        </div>
+
+        <!-- 5. Recent & Favorite Dishes -->
+        <div class="card history-card">
+          <div class="card-header">
+            <h2>🕘 Recent Dishes (Quick Re-Log)</h2>
+          </div>
+          <div id="recentHistoryList" class="history-list">
+            <div class="empty-state">Dishes you log will appear here for 1-tap re-logging.</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Toast Notification with Undo -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚙️ Gemini &amp; Garmin Settings</h3>
+        <button type="button" id="closeSettingsBtn" class="icon-btn-sm">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="geminiKeyInput" class="input-label">
+            Google Gemini API Key
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="ext-link">Get free key at Google AI Studio ↗</a>
+          </label>
+          <input
+            type="password"
+            id="geminiKeyInput"
+            class="text-input"
+            placeholder="AIzaSy..."
+            autocomplete="off"
+          />
+          <p id="currentKeyHint" class="form-hint"></p>
+        </div>
+
+        <div class="form-group">
+          <label for="geminiModelSelect" class="input-label">Gemini Vision Model</label>
+          <select id="geminiModelSelect" class="text-input">
+            <option value="gemini-3.8-flash">gemini-3.8-flash (Recommended · Latest Fast &amp; Accurate)</option>
+            <option value="gemini-4-argon">gemini-4-argon (Gemini 4 Argon · Deepest Reasoning)</option>
+            <option value="gemini-3.5-flash">gemini-3.5-flash (Gemini 3.5 Flash)</option>
+            <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Gemini 3.1 Pro)</option>
+            <option value="gemini-flash-latest">gemini-flash-latest (Auto-Latest Flash)</option>
+          </select>
+        </div>
+
+        <div id="keyTestResultBox" class="test-result-box hidden"></div>
+
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0 1rem 0;" />
+
+        <!-- Garmin Connect Account Section (Direct Phone Login) -->
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <label class="input-label" style="margin-bottom:0;">🏃 Garmin Connect Account</label>
+            <span id="garminAccountBadge" class="badge badge-neutral">● Disconnected</span>
+          </div>
+
+          <!-- Connected State View -->
+          <div id="garminConnectedBox" class="hidden" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong style="color: #10b981;">✓ Connected to Garmin</strong>
+                <div id="garminConnectedName" style="font-size: 0.85rem; color: #94a3b8;">ghenry69</div>
+              </div>
+              <button type="button" id="garminDisconnectBtn" class="btn btn-xs btn-outline" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;">Disconnect</button>
+            </div>
+          </div>
+
+          <!-- Disconnected / Login Form View -->
+          <div id="garminLoginFormBox">
+            <p class="form-hint" style="margin-bottom: 0.5rem;">
+              Log in once to connect your Garmin account directly on this phone. No laptop or server required.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <input
+                type="email"
+                id="garminEmailInput"
+                class="text-input"
+                placeholder="Garmin Connect Email"
+                autocomplete="email"
+              />
+              <input
+                type="password"
+                id="garminPasswordInput"
+                class="text-input"
+                placeholder="Garmin Connect Password"
+                autocomplete="current-password"
+              />
+              <div id="garminMfaGroup" class="hidden" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.5rem;">
+                <label for="garminMfaInput" class="input-label" style="font-size: 0.8rem; color: #38bdf8;">
+                  🔑 Enter 6-digit MFA Code sent to your phone/email:
+                </label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input
+                    type="text"
+                    id="garminMfaInput"
+                    class="text-input"
+                    placeholder="123456"
+                    maxlength="8"
+                    inputmode="numeric"
+                  />
+                  <button type="button" id="garminVerifyMfaBtn" class="btn btn-sm btn-primary">Verify</button>
+                </div>
+              </div>
+              <button type="button" id="garminLoginBtn" class="btn btn-sm btn-primary" style="margin-top: 0.25rem;">
+                Connect to Garmin
+              </button>
+            </div>
+          </div>
+          <div id="garminLoginResultBox" class="test-result-box hidden" style="margin-top: 0.5rem;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="testKeyBtn" class="btn btn-outline">Test API Key</button>
+        <button type="button" id="saveSettingsBtn" class="btn btn-primary">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile QR Code & Android Install Assistant Modal -->
+  <div id="qrModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-qr">
+      <div class="modal-header">
+        <h3>📱 Install as Android App on Pixel</h3>
+        <button type="button" id="closeQrBtn" class="icon-btn-sm">✕</button>
+      </div>
+      <div class="modal-body qr-body">
+        <!-- Shown when native install prompt is ready -->
+        <div id="nativeInstallReadyBox" class="install-method-box install-ready-box hidden">
+          <strong>✅ Ready to Install!</strong>
+          <p>Tap below to install <strong>Dish Logger</strong> as a full Android app on your Pixel:</p>
+          <button type="button" id="modalNativeInstallBtn" class="btn btn-primary btn-block">
+            📲 Install Android App Now
+          </button>
+        </div>
+
+        <!-- Standalone Native Android APK Option -->
+        <div class="install-method-box" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.08); margin-bottom: 1rem; border-radius: 8px; padding: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong style="color: #38bdf8; font-size: 1rem;">📦 Standalone Android App (No Laptop Required)</strong>
+            <span class="badge badge-primary">Option 4</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.4; margin-bottom: 0.75rem;">
+            Runs 100% autonomously on your Android phone. Connects directly to Garmin Connect and Gemini Vision without needing your laptop or any cloud server.
+          </p>
+          <a
+            id="apkDownloadLink"
+            href="https://github.com/df-ghenry/garmin-dish-logger/releases/download/apk-latest/DishLogger.apk"
+            class="btn btn-primary btn-block"
+            style="text-decoration: none; text-align: center; display: block;"
+            download="DishLogger.apk"
+          >
+            📲 Download DishLogger.apk
+          </a>
+        </div>
+
+        <div class="qr-row">
+          <div id="qrSvgContainer" class="qr-svg-box qr-svg-sm"></div>
+          <div class="qr-urls-col">
+            <span class="qr-label">Installable HTTPS App URL (Works on Wi-Fi &amp; 5G):</span>
+            <div class="qr-url-box">
+              <code id="qrPrimaryUrl">https://...trycloudflare.com</code>
+            </div>
+            <a id="openTunnelUrlBtn" href="#" class="btn btn-primary btn-sm w-full" style="margin-top: 6px; text-decoration: none;">
+              🚀 Open Installable HTTPS URL
+            </a>
+          </div>
+        </div>
+
+        <!-- Android Chrome Install Instructions -->
+        <div class="install-steps-card">
+          <h3>🤖 Why Android Showed "Impossible to Install" on Local IP &amp; How This Fixes It</h3>
+          <p class="form-hint" style="line-height: 1.45;">
+            When Chrome on Android installs a WebAPK, <strong>Google Play Services' cloud server</strong> must fetch <code>manifest.json</code> over a publicly reachable <code>https://</code> domain (it rejects private <code>192.168.x.x</code> IPs even with Chrome flags).
+          </p>
+
+          <div class="install-option">
+            <div class="install-option-header">
+              <span class="badge badge-success">Recommended</span>
+              <strong>1-Tap Install via Automatic Cloudflare HTTPS Tunnel</strong>
+            </div>
+            <ol class="install-steps-list">
+              <li>
+                Scan the QR code above with your Pixel camera (or tap <strong>🚀 Open Installable HTTPS URL</strong> above if you are already on your phone).
+              </li>
+              <li>
+                Once on the <code>https://...trycloudflare.com</code> address, tap <strong>📲 Install App</strong> at the top of the screen (or Chrome menu <strong>⋮ → Install app</strong>).
+              </li>
+              <li>
+                Google Play Services will verify the HTTPS manifest and install <strong>Dish Logger</strong> directly onto your Pixel!
+              </li>
+            </ol>
+          </div>
+
+          <div class="install-option">
+            <div class="install-option-header">
+              <span class="badge badge-neutral">Local Wi-Fi Only</span>
+              <strong>Local Wi-Fi Shortcut (<code id="lanUrlLabel">http://192.168.x.x:3456</code>)</strong>
+            </div>
+            <p class="form-hint">
+              If using the local IP directly without the HTTPS tunnel, use Chrome menu <strong>⋮ → Add to Home screen</strong> (local shortcut mode).
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js?v=20261024-v9"></script>
+</body>
+</html>

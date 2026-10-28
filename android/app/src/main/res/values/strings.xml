@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Dish Logger</string>
+    <string name="title_activity_main">Dish Logger</string>
+    <string name="package_name">finance.doo.garmindishlogger</string>
+    <string name="custom_url_scheme">finance.doo.garmindishlogger</string>
+</resources>

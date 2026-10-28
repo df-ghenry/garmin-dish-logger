@@ -1,0 +1,33 @@
+{
+  "name": "garmin-dish-logger",
+  "version": "1.0.0",
+  "description": "Snap a picture of a dish, compute calories & macros with Gemini Vision, preview/adjust, and log directly into Garmin Connect.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsup src/server.ts --format esm --target node20 --clean",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/camera": "^8.2.6",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/preferences": "^8.0.1",
+    "axios": "^1.7.9",
+    "axios-cookiejar-support": "^5.0.3",
+    "oauth-1.0a": "^2.2.6",
+    "qrcode": "^1.5.4",
+    "tough-cookie": "^5.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
