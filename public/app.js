@@ -1860,7 +1860,9 @@ function fallbackCopyText(text, toastMessage) {
 function isStandaloneApp() {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true
+    window.navigator.standalone === true ||
+    window.Capacitor?.isNativePlatform?.() === true ||
+    Boolean(window.Capacitor)
   );
 }
 
@@ -1931,14 +1933,6 @@ function initPwaAndInstall() {
     return;
   }
 
-  // Show install banner on Android if not already installed or dismissed
-  if (isAndroid && !sessionStorage.getItem('pwaBannerDismissed')) {
-    els.androidInstallBanner?.classList.remove('hidden');
-    if (!isTrueHttpsOrLocalhost() && els.bannerInstallBtn) {
-      els.bannerInstallBtn.textContent = '🚀 Switch to HTTPS & Install';
-    }
-  }
-
   window.addEventListener('beforeinstallprompt', (e) => {
     if (!isTrueHttpsOrLocalhost()) {
       // Prevent broken WebAPK attempt on raw HTTP private IP
@@ -1949,12 +1943,6 @@ function initPwaAndInstall() {
     state.deferredInstallPrompt = e;
     els.installPwaBtn?.classList.remove('hidden');
     els.nativeInstallReadyBox?.classList.remove('hidden');
-    if (els.bannerInstallBtn) {
-      els.bannerInstallBtn.textContent = '📲 Install App';
-    }
-    if (!sessionStorage.getItem('pwaBannerDismissed')) {
-      els.androidInstallBanner?.classList.remove('hidden');
-    }
   });
 
   window.addEventListener('appinstalled', () => {
