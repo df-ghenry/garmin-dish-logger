@@ -1,4 +1,4 @@
-package finance.doo.garmindishlogger;
+package finance.doo.dishlogger;
 
 import com.getcapacitor.BridgeActivity;
 

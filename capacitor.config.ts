@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'finance.doo.garmindishlogger',
+  appId: 'finance.doo.dishlogger',
   appName: 'Dish Logger',
   webDir: 'public',
   plugins: {
