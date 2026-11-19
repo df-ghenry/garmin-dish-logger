@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garmin-dish-logger-v9';
+const CACHE_NAME = 'garmin-dish-logger-v10';
 const BEACON_GIST_URL = 'https://api.github.com/gists/1d47f9c40ee2ac4743ff81b62351ddad';
 const BEACON_RAW_URL =
   'https://gist.githubusercontent.com/df-ghenry/1d47f9c40ee2ac4743ff81b62351ddad/raw/garmin-dish-logger-beacon.json';
@@ -7,6 +7,7 @@ const APP_SHELL_ASSETS = [
   './index.html',
   './styles.css',
   './app.js',
+  './garmin-client.js',
   './manifest.json',
   './icon.svg',
   './icon-192.png',
@@ -82,8 +83,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Ignore external requests (e.g. GitHub Gist beacon or Gemini API)
-  if (url.origin !== self.location.origin) {
+  // Ignore external requests (e.g. GitHub Gist beacon or Gemini API) or Capacitor internal interceptors
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/_capacitor_')) {
     return;
   }
 

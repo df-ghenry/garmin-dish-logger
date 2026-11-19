@@ -4,6 +4,10 @@
  */
 
 const OAUTH_CONSUMER_URL = 'https://thegarth.s3.amazonaws.com/oauth_consumer.json';
+const DEFAULT_OAUTH_CONSUMER = {
+  consumer_key: 'fc3e99d2-118c-44b8-8ae3-03370dde24c0',
+  consumer_secret: 'E08WAR897WEy2knn7aFBrvegVAf0AFdWBBF',
+};
 const SSO_EMBED = 'https://sso.garmin.com/sso/embed';
 const SSO_SIGNIN = 'https://sso.garmin.com/sso/signin';
 const SSO_ORIGIN = 'https://sso.garmin.com';
@@ -34,21 +38,41 @@ const KEY_CONSUMER = 'gdl_garmin_consumer';
 // Helper: HTTP request using CapacitorHttp if available, otherwise fetch
 async function httpReq(options) {
   const method = (options.method || 'GET').toUpperCase();
-  const url = options.url;
-  const headers = options.headers || {};
-  const data = options.data;
   const params = options.params;
+  let fullUrl = options.url;
+  if (params && Object.keys(params).length > 0) {
+    const sp = new URLSearchParams(params);
+    fullUrl += (fullUrl.includes('?') ? '&' : '?') + sp.toString();
+  }
+
+  const headers = {
+    'User-Agent': USER_AGENT_MOBILE,
+    ...(options.headers || {}),
+  };
+  const data = options.data;
 
   // 1. Capacitor Native HTTP (bypasses CORS on Android)
-  if (window.Capacitor?.Plugins?.CapacitorHttp) {
+  const capHttpReq =
+    window.Capacitor?.Plugins?.CapacitorHttp?.request
+      ? (opts) => window.Capacitor.Plugins.CapacitorHttp.request(opts)
+      : window.Capacitor?.nativePromise
+        ? (opts) => window.Capacitor.nativePromise('CapacitorHttp', 'request', opts)
+        : null;
+
+  let nativeErr = null;
+  if (capHttpReq) {
     try {
-      const res = await window.Capacitor.Plugins.CapacitorHttp.request({
+      const reqPayload = {
         method,
-        url,
+        url: fullUrl,
         headers,
-        data,
-        params,
-      });
+        connectTimeout: 15000,
+        readTimeout: 15000,
+      };
+      if (data !== undefined && method !== 'GET' && method !== 'HEAD') {
+        reqPayload.data = data;
+      }
+      const res = await capHttpReq(reqPayload);
       return {
         status: res.status,
         ok: res.status >= 200 && res.status < 300,
@@ -56,17 +80,12 @@ async function httpReq(options) {
         data: res.data,
       };
     } catch (err) {
-      console.warn('CapacitorHttp failed, falling back to fetch:', err);
+      nativeErr = err;
+      console.warn('CapacitorHttp failed:', err);
     }
   }
 
   // 2. Standard Fetch fallback
-  let fullUrl = url;
-  if (params && Object.keys(params).length > 0) {
-    const sp = new URLSearchParams(params);
-    fullUrl += (fullUrl.includes('?') ? '&' : '?') + sp.toString();
-  }
-
   let body = undefined;
   if (data !== undefined && method !== 'GET' && method !== 'HEAD') {
     if (typeof data === 'string') {
@@ -78,31 +97,38 @@ async function httpReq(options) {
     }
   }
 
-  const res = await fetch(fullUrl, {
-    method,
-    headers,
-    body,
-  });
+  try {
+    const res = await fetch(fullUrl, {
+      method,
+      headers,
+      body,
+    });
 
-  const contentType = res.headers.get('content-type') || '';
-  let resData;
-  if (contentType.includes('application/json')) {
-    resData = await res.json();
-  } else {
-    resData = await res.text();
+    const contentType = res.headers.get('content-type') || '';
+    let resData;
+    if (contentType.includes('application/json')) {
+      resData = await res.json();
+    } else {
+      resData = await res.text();
+    }
+
+    const resHeaders = {};
+    res.headers.forEach((val, key) => {
+      resHeaders[key] = val;
+    });
+
+    return {
+      status: res.status,
+      ok: res.ok,
+      headers: resHeaders,
+      data: resData,
+    };
+  } catch (fetchErr) {
+    if (nativeErr) {
+      throw new Error(`Native HTTP error: ${nativeErr.message || String(nativeErr)}`);
+    }
+    throw fetchErr;
   }
-
-  const resHeaders = {};
-  res.headers.forEach((val, key) => {
-    resHeaders[key] = val;
-  });
-
-  return {
-    status: res.status,
-    ok: res.ok,
-    headers: resHeaders,
-    data: resData,
-  };
 }
 
 // Web Crypto HMAC-SHA1
@@ -205,8 +231,20 @@ class DirectGarminClient {
     }
   }
 
+  isNativeAvailable() {
+    return Boolean(
+      window.Capacitor?.isNativePlatform?.() ||
+      window.Capacitor?.Plugins?.CapacitorHttp ||
+      window.Capacitor?.nativePromise
+    );
+  }
+
   isConnected() {
     return Boolean(this.oauth1Token && this.oauth2Token);
+  }
+
+  canRunDirectly() {
+    return this.isNativeAvailable() && this.isConnected();
   }
 
   getProfile() {
@@ -228,14 +266,26 @@ class DirectGarminClient {
   }
 
   async fetchConsumer() {
-    if (this.consumer) return this.consumer;
-    const res = await httpReq({ url: OAUTH_CONSUMER_URL });
-    if (res.ok && res.data?.consumer_key) {
-      this.consumer = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-      this.saveToStorage();
+    if (this.consumer?.consumer_key && this.consumer?.consumer_secret) {
       return this.consumer;
     }
-    throw new Error('Failed to fetch Garmin OAuth consumer credentials');
+    try {
+      const res = await httpReq({
+        url: OAUTH_CONSUMER_URL,
+        headers: { 'User-Agent': USER_AGENT_MOBILE },
+      });
+      const parsed = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+      if (res.ok && parsed?.consumer_key && parsed?.consumer_secret) {
+        this.consumer = parsed;
+        this.saveToStorage();
+        return this.consumer;
+      }
+    } catch {
+      // Fall back to default consumer credentials
+    }
+    this.consumer = DEFAULT_OAUTH_CONSUMER;
+    this.saveToStorage();
+    return this.consumer;
   }
 
   isOAuth2Valid() {
@@ -264,6 +314,7 @@ class DirectGarminClient {
     const res = await httpReq({
       method: 'POST',
       url: exchangeUrl,
+      data: '',
       headers: {
         'User-Agent': USER_AGENT_MOBILE,
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -543,7 +594,16 @@ class DirectGarminClient {
         throw new Error(`Garmin API error (${res.status}): ${JSON.stringify(res.data)}`);
       }
 
-      return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+      if (typeof res.data === 'string') {
+        const trimmed = res.data.trim();
+        if (!trimmed) return {};
+        try {
+          return JSON.parse(trimmed);
+        } catch {
+          return { raw: trimmed };
+        }
+      }
+      return res.data ?? {};
     }
   }
 
@@ -553,7 +613,7 @@ class DirectGarminClient {
     const resolvedDate = dateStr || today;
 
     const [foodLogRaw, summaryRaw] = await Promise.all([
-      this.request(`/nutrition-service/food/logs/${resolvedDate}`).catch(() => null),
+      this.request(`/nutrition-service/food/logs/${resolvedDate}`),
       this.request(
         `/usersummary-service/usersummary/daily/${this.profile?.displayName}?calendarDate=${resolvedDate}`
       ).catch(() => null),
