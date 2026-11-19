@@ -1,5 +1,5 @@
 // Garmin Dish Logger Frontend Application
-import { directGarmin } from './garmin-client.js';
+import { directGarmin } from './garmin-client.js?v=20261119-v10';
 
 const BEACON_GIST_URL = 'https://api.github.com/gists/1d47f9c40ee2ac4743ff81b62351ddad';
 const BEACON_RAW_URL =
@@ -75,8 +75,9 @@ async function discoverLiveBackendUrl(forceProbe = false) {
     return state.apiBaseUrl;
   }
 
-  // 1. If running on localhost or same host, probe local origin
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  // 1. If running on localhost or same host (and not inside Capacitor native WebView), probe local origin
+  const isNativeCap = Boolean(window.Capacitor?.isNativePlatform?.() || window.Capacitor);
+  if (!isNativeCap && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     if (await probeBackendUrl('', 2000)) {
       state.apiBaseUrl = '';
       state.connected = true;
@@ -494,32 +495,42 @@ function renderGarminAccountSettings() {
 async function fetchAppStatus() {
   // Always update direct mobile state first
   renderGarminAccountSettings();
+  const cachedKey = localStorage.getItem('gdl_gemini_key');
+  const cachedModel = localStorage.getItem('gdl_gemini_model') || 'gemini-3.8-flash';
+  if (cachedKey) {
+    state.geminiConfigured = true;
+    els.geminiStatusBadge.className = 'badge badge-success';
+    els.geminiStatusBadge.textContent = `● ${cachedModel}`;
+    els.apiKeyBanner.classList.add('hidden');
+  }
 
   try {
     const res = await apiFetch('/api/status');
     const data = await res.json();
 
-    if (directGarmin.isConnected()) {
+    if (data.garmin?.connected) {
+      els.garminStatusBadge.className = 'badge badge-success';
+      els.garminStatusBadge.textContent = `● Garmin Connected · ${data.garmin.displayName}`;
+      // Auto-import/refresh tokens from laptop to phone direct client
+      if (!directGarmin.isConnected() || !directGarmin.isOAuth2Valid()) {
+        try {
+          const tokRes = await apiFetch('/api/garmin/tokens');
+          if (tokRes.ok) {
+            const tokData = await tokRes.json();
+            if (tokData?.oauth1 && tokData?.oauth2) {
+              directGarmin.importTokens(tokData.oauth1, tokData.oauth2, tokData.profile);
+              renderGarminAccountSettings();
+              updateLaptopBadge('connected');
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    } else if (directGarmin.isConnected()) {
       const p = directGarmin.getProfile();
       els.garminStatusBadge.className = 'badge badge-success';
       els.garminStatusBadge.textContent = `● Garmin: ${p?.fullName || p?.displayName || 'Connected'}`;
-    } else if (data.garmin?.connected) {
-      els.garminStatusBadge.className = 'badge badge-success';
-      els.garminStatusBadge.textContent = `● Garmin Connected · ${data.garmin.displayName}`;
-      // Auto-import tokens from laptop to phone direct client
-      try {
-        const tokRes = await apiFetch('/api/garmin/tokens');
-        if (tokRes.ok) {
-          const tokData = await tokRes.json();
-          if (tokData?.oauth1 && tokData?.oauth2) {
-            directGarmin.importTokens(tokData.oauth1, tokData.oauth2, tokData.profile);
-            renderGarminAccountSettings();
-            updateLaptopBadge('connected');
-          }
-        }
-      } catch {
-        // Ignore
-      }
     } else {
       els.garminStatusBadge.className = 'badge badge-warn';
       els.garminStatusBadge.textContent = '⚠️ Garmin Disconnected';
@@ -602,10 +613,18 @@ async function fetchAppStatus() {
 async function fetchGarminNutrition(dateStr = state.selectedDate) {
   els.refreshGarminBtn.disabled = true;
   try {
-    let data;
-    if (directGarmin.isConnected()) {
-      data = await directGarmin.getDailyNutrition(dateStr);
-    } else {
+    let data = null;
+    if (directGarmin.canRunDirectly()) {
+      try {
+        data = await directGarmin.getDailyNutrition(dateStr);
+      } catch (directErr) {
+        console.warn('Direct Garmin nutrition sync failed, falling back to server:', directErr);
+        if (!state.connected && !state.apiBaseUrl) {
+          throw directErr;
+        }
+      }
+    }
+    if (!data) {
       const res = await apiFetch(`/api/nutrition?date=${encodeURIComponent(dateStr)}`);
       data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch Garmin nutrition');
@@ -730,10 +749,18 @@ function renderGarminDashboard(overview) {
 
 async function deleteGarminFoodEntry(dateStr, logId, foodName) {
   try {
-    let overview;
-    if (directGarmin.isConnected()) {
-      overview = await directGarmin.deleteFoodLogEntry(dateStr, logId);
-    } else {
+    let overview = null;
+    if (directGarmin.canRunDirectly()) {
+      try {
+        overview = await directGarmin.deleteFoodLogEntry(dateStr, logId);
+      } catch (directErr) {
+        console.warn('Direct Garmin delete failed, falling back to server:', directErr);
+        if (!state.connected && !state.apiBaseUrl) {
+          throw directErr;
+        }
+      }
+    }
+    if (!overview) {
       const res = await apiFetch(
         `/api/garmin/log/${encodeURIComponent(dateStr)}/${encodeURIComponent(logId)}`,
         { method: 'DELETE' },
@@ -1035,26 +1062,35 @@ async function logCurrentDishToGarmin() {
   els.logToGarminBtn.innerHTML = '<span>⏳ Pushing to Garmin Connect...</span>';
 
   try {
-    let data;
-    if (directGarmin.isConnected()) {
-      const overview = await directGarmin.quickAddDish({
-        name: dishName,
-        calories,
-        protein,
-        carbs,
-        fat,
-        fiber: state.currentAnalysis.fiber || 0,
-        grams: state.currentAnalysis.totalGrams || 350,
-        meal: state.selectedMeal,
-        date: state.selectedDate,
-        saveCustomFood: els.saveCustomFoodCheckbox.checked,
-      });
-      data = {
-        overview,
-        mealName: state.selectedMeal,
-        logId: null,
-      };
-    } else {
+    let data = null;
+    if (directGarmin.canRunDirectly()) {
+      try {
+        const overview = await directGarmin.quickAddDish({
+          name: dishName,
+          calories,
+          protein,
+          carbs,
+          fat,
+          fiber: state.currentAnalysis.fiber || 0,
+          grams: state.currentAnalysis.totalGrams || 350,
+          meal: state.selectedMeal,
+          date: state.selectedDate,
+          saveCustomFood: els.saveCustomFoodCheckbox.checked,
+        });
+        data = {
+          overview,
+          mealName: state.selectedMeal,
+          logId: null,
+        };
+      } catch (directErr) {
+        console.warn('Direct Garmin log failed, falling back to server:', directErr);
+        const isApiErr = String(directErr.message || '').includes('Garmin API error');
+        if (isApiErr || (!state.connected && !state.apiBaseUrl)) {
+          throw directErr;
+        }
+      }
+    }
+    if (!data) {
       const res = await apiFetch('/api/garmin/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1097,7 +1133,11 @@ async function logCurrentDishToGarmin() {
       },
     );
   } catch (err) {
-    const isOffline = !state.connected || String(err.message).includes('laptop') || String(err.message).includes('reach');
+    const errMsg = String(err.message || '');
+    const isGarminRejection = errMsg.includes('Garmin API error');
+    const isOffline =
+      !isGarminRejection &&
+      (!state.connected || errMsg.includes('laptop') || errMsg.includes('reach') || errMsg.includes('Failed to fetch'));
     if (isOffline) {
       const queuedMeal = {
         id: `offline-${Date.now()}`,
@@ -1145,7 +1185,8 @@ function saveToOfflineQueue(item) {
 }
 
 async function flushOfflineGarminQueue() {
-  if (!state.connected || !state.apiBaseUrl) return;
+  const canDirect = directGarmin.canRunDirectly();
+  if (!canDirect && (!state.connected || !state.apiBaseUrl)) return;
   const queue = getOfflineQueue();
   if (queue.length === 0) return;
 
@@ -1154,12 +1195,35 @@ async function flushOfflineGarminQueue() {
 
   for (const item of queue) {
     try {
-      const res = await apiFetch('/api/garmin/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      });
-      if (res.ok) {
+      let ok = false;
+      if (canDirect) {
+        try {
+          await directGarmin.quickAddDish({
+            name: item.name,
+            calories: item.calories,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            fiber: item.fiber || 0,
+            grams: item.totalGrams || 350,
+            meal: item.meal,
+            date: item.date,
+            saveCustomFood: item.saveCustomFood,
+          });
+          ok = true;
+        } catch {
+          ok = false;
+        }
+      }
+      if (!ok && state.connected && state.apiBaseUrl) {
+        const res = await apiFetch('/api/garmin/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item),
+        });
+        ok = res.ok;
+      }
+      if (ok) {
         syncedCount++;
       } else {
         remaining.push(item);
@@ -1905,11 +1969,11 @@ async function triggerNativePwaInstall() {
 }
 
 function initPwaAndInstall() {
-  // Only register Service Worker on true HTTPS or localhost.
-  // On raw http://192.168.x.x IPs (even with Chrome flags), Google Play Services' cloud WebAPK
-  // server rejects private HTTP URLs with "Impossible to install the app".
+  // Never register Service Worker inside native Capacitor Android app (where origin is https://localhost).
+  // Unregister any old Service Worker and clear stale SW caches in Capacitor.
+  const isNativeCap = Boolean(window.Capacitor?.isNativePlatform?.() || window.Capacitor);
   if ('serviceWorker' in navigator) {
-    if (isTrueHttpsOrLocalhost()) {
+    if (!isNativeCap && isTrueHttpsOrLocalhost()) {
       navigator.serviceWorker
         .register('./sw.js', { scope: './' })
         .then((reg) => {
@@ -1921,6 +1985,12 @@ function initPwaAndInstall() {
         .getRegistrations()
         .then((regs) => regs.forEach((r) => r.unregister()))
         .catch(() => {});
+      if (isNativeCap && 'caches' in window) {
+        caches
+          .keys()
+          .then((keys) => keys.forEach((k) => caches.delete(k)))
+          .catch(() => {});
+      }
     }
   }
 
